@@ -124,4 +124,4 @@ def test_value_invariance(net, atol: float = 1e-5):
     print("[Value] Success: D4xS3 invariant within tolerance.")
 
 test_policy_equivariance(PolicyNet().double())
-# test_value_invariance(ValueNet().double())
+test_value_invariance(ValueNet().double())
