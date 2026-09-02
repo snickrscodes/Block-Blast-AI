@@ -3,6 +3,7 @@ from typing import Tuple, List
 
 import torch
 import torch.nn as nn
+import torch.distributed as dist
 from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
@@ -11,8 +12,8 @@ import bbengine.bbengine as bb
 from config import Config
 from memory import MemoryBuffer
 from policy_math.returns import gae, ce_loss
-from utils import unpack_obs, pack_obs
-from model.cnn import vscale_inv, vscale
+from utils import unpack_obs, pack_obs, reset_and_deal
+from policy_math.value_scale import vscale_inv, vscale
 
 @torch.no_grad()
 def collect_rollout_hands(
@@ -225,6 +226,20 @@ def run_value_epoch(
     k_after = batch["block_after"].view(-1, 3)[msk_after]
     v_after_targ = batch["v_targ_after"].view(-1)[msk_after]
 
+    # DDP requires every rank to execute the same number of backward calls.
+    # The number of chance-node afterstates is trajectory-dependent, so use
+    # the global minimum and randomly subsample only the excess examples.
+    if dist.is_initialized():
+        n_after = torch.tensor([b_after.shape[0]], dtype=torch.int64, device=device)
+        dist.all_reduce(n_after, op=dist.ReduceOp.MIN)
+        n_after = int(n_after.item())
+        if b_after.shape[0] > n_after:
+            keep = torch.randperm(b_after.shape[0])[:n_after]
+            b_after = b_after[keep]
+            i_after = i_after[keep]
+            k_after = k_after[keep]
+            v_after_targ = v_after_targ[keep]
+
     board = torch.cat([b_t, b_after], dim=0)
     info = torch.cat([i_t, i_after], dim=0)
     block = torch.cat([k_t, k_after], dim=0)
@@ -267,7 +282,7 @@ def train_phase(
     opt_V: Optimizer, sched_P: LRScheduler, sched_V: LRScheduler,
     device: torch.device,
 ) -> None:
-    env.reset_all()
+    reset_and_deal(env)
     V.eval()
     P.eval()
     for _ in range(cfg.n_rollouts_phase):
@@ -292,7 +307,7 @@ def train_phase(
 @torch.no_grad()
 def test(
     env: bb.BatchEnv, P: nn.Module, V: nn.Module, 
-    plan: bb.BeamSearch, device: torch.device,
+    device: torch.device, plan: bb.BeamSearch = None,
     n_episodes: int = 10, max_placements: int = 500,
 ) -> Tuple[float, float, float, float, List[float]]:
     P.eval()
@@ -312,7 +327,7 @@ def test(
     all_ep_lens: List[Tensor] = []
 
     for _ in range(n_episodes):
-        env.reset_all()
+        reset_and_deal(env)
 
         dones = torch.zeros((B,), dtype=torch.bool)
         ep_rew = torch.zeros((B,), dtype=torch.float64)
@@ -326,7 +341,13 @@ def test(
             m = env.metas().to(torch.int64)[active_idx].to(torch.uint64)
 
             # search for active envs only
-            pi = plan.search_batch(b, m, policy_logits_fn, value_fn, use_noise=False) # (M, 192)
+            if plan is not None:
+                pi = plan.search_batch(b, m, policy_logits_fn, value_fn, use_noise=False) # (M, 192)
+            else:
+                msk = bb.legal_mask_batch(b, m)
+                logits = policy_logits_fn(b, m)
+                logits.masked_fill_(~msk, -1e9)
+                pi = logits.softmax(-1)
 
             # sample and step
             a = pi.argmax(-1) # (M,) cpu
