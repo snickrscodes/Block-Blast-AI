@@ -134,3 +134,10 @@ def invert_perm(perm: Tensor) -> Tensor:
     ar = torch.arange(perm.shape[-1], device=perm.device, dtype=perm.dtype).expand_as(perm)
     inv.scatter_(-1, perm, ar)
     return inv
+
+def get_coord_map(h: int, w: int) -> Tensor:
+    y_coords = torch.linspace(-1, 1, h, dtype=torch.float)
+    x_coords = torch.linspace(-1, 1, w, dtype=torch.float)
+    y, x = torch.meshgrid(y_coords, x_coords, indexing='ij')
+    r = torch.sqrt(x * x + y * y)
+    return torch.stack([x, y, r], dim=0) # (3, H, W)
