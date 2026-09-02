@@ -1,16 +1,31 @@
-import torch
-import torch.nn as nn
-from torch import Tensor
-from typing import List, Tuple
-import pygame
-from pygame import Rect
+import argparse
 from functools import lru_cache
-import bbengine.bbengine as bb
-from utils import load_models, unpack_obs
-from core import make_models
-from model.cnn import vscale_inv
+from pathlib import Path
+from typing import List, Tuple
 
-FONT_PATH = r"C:\Users\PC\Desktop\python_projects\block_blast\assets\LeagueSpartan-Bold.otf"
+import pygame
+import torch
+from pygame import Rect
+from torch import Tensor
+
+import bbengine.bbengine as bb
+from core import make_models
+from policy_math.value_scale import vscale_inv
+from utils import checkpoint_config, load_models, reset_and_deal, unpack_obs
+
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+ROOT_DIR = Path(__file__).resolve().parent
+DEFAULT_CHECKPOINT = ROOT_DIR / "chkpts" / "chkpt3"
+DEFAULT_FONT = ROOT_DIR / "assets" / "LeagueSpartan-Bold.otf"
+
+
+# ---------------------------------------------------------------------------
+# Rendering constants
+# ---------------------------------------------------------------------------
 
 BG_COLOR = (52, 74, 131)
 BOARD_COLOR = (33, 36, 66)
@@ -19,7 +34,7 @@ GRID_COLOR = (24, 28, 57)
 SCORE_COLOR = (255, 255, 255)
 FRAME_COLOR = (38, 42, 52)
 
-ENV_ASPECT = 16 / 9 # 16:9 (h:w)
+ENV_ASPECT = 16 / 9  # h:w
 MIN_ENV_W = 72
 MIN_ENV_H = 128
 FPS = 60
@@ -33,8 +48,75 @@ BLOCK_MASK = bb.BLOCK_MASK
 NULL_BLOCK = bb.NULL_BLOCK
 BLOCKS = bb.blocks.tolist()
 
-# calculate centers (row and col) in doubled coordinates
+
+# Set by main().
+_font_path: Path | None = None
+
+
+# ---------------------------------------------------------------------------
+# CLI / device
+# ---------------------------------------------------------------------------
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Render a trained Block Blast agent."
+    )
+
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=DEFAULT_CHECKPOINT,
+        help=(
+            "Path to the model checkpoint "
+            f"(default: {DEFAULT_CHECKPOINT})"
+        ),
+    )
+
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="Inference device: auto, cpu, cuda, cuda:0, etc. (default: auto)",
+    )
+
+    parser.add_argument(
+        "--font",
+        type=Path,
+        default=DEFAULT_FONT,
+        help=(
+            "Optional font file. Falls back to a system font if missing "
+            f"(default: {DEFAULT_FONT})"
+        ),
+    )
+
+    return parser.parse_args()
+
+
+def resolve_device(spec: str) -> torch.device:
+    if spec == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda:0")
+        return torch.device("cpu")
+
+    device = torch.device(spec)
+
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f"CUDA device {spec!r} was requested, but CUDA is unavailable."
+            )
+
+        if device.index is not None:
+            torch.cuda.set_device(device.index)
+
+    return device
+
+
+# ---------------------------------------------------------------------------
+# Block geometry
+# ---------------------------------------------------------------------------
+
 def calc_centers2() -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    """Calculate block centers in doubled row/column coordinates."""
     r2 = []
     c2 = []
 
@@ -53,31 +135,59 @@ def calc_centers2() -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
             r = p // 8
             c = p % 8
 
-            if r > maxr: maxr = r
-            if c > maxc: maxc = c
-            if r < minr: minr = r
-            if c < minc: minc = c
-        
+            if r > maxr:
+                maxr = r
+            if c > maxc:
+                maxc = c
+            if r < minr:
+                minr = r
+            if c < minc:
+                minc = c
+
         r2.append(minr + maxr)
         c2.append(minc + maxc)
 
     return tuple(r2), tuple(c2)
 
+
 CENTER_R2, CENTER_C2 = calc_centers2()
 
+
+# ---------------------------------------------------------------------------
+# Pygame helpers
+# ---------------------------------------------------------------------------
+
 @lru_cache(maxsize=4)
-def get_font(size):
-    return pygame.font.Font(FONT_PATH, size)
+def get_font(size: int) -> pygame.font.Font:
+    if _font_path is not None and _font_path.is_file():
+        return pygame.font.Font(str(_font_path), size)
+
+    # Portable fallback.
+    return pygame.font.SysFont("arial", size, bold=True)
+
 
 def make_window(title: str = "Block Blast"):
     pygame.init()
     pygame.font.init()
     pygame.display.set_caption(title)
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), flags=pygame.RESIZABLE)
+
+    screen = pygame.display.set_mode(
+        (WIDTH, HEIGHT),
+        flags=pygame.RESIZABLE,
+    )
+
     clock = pygame.time.Clock()
     return screen, clock
 
-def draw_block(screen: pygame.Surface, bid: int, x_pos: int, y_pos: int, w: int, stroke: int):
+
+def draw_block(
+    screen: pygame.Surface,
+    bid: int,
+    x_pos: int,
+    y_pos: int,
+    w: int,
+    stroke: int,
+):
     cr = CENTER_R2[bid]
     cc = CENTER_C2[bid]
     b = BLOCKS[bid]
@@ -91,15 +201,23 @@ def draw_block(screen: pygame.Surface, bid: int, x_pos: int, y_pos: int, w: int,
 
         bx = int(c * w + x_pos)
         by = int(r * w + y_pos)
-        
+
         a = Rect(bx, by, w, w)
         screen.fill((255, 255, 255), a)
         pygame.draw.rect(screen, BOARD_OUTLINE, a, width=stroke)
 
         b ^= lsb
 
-def render_env(screen: pygame.Surface, board_: int, meta_: int, score_: int, rect: Rect):
+
+def render_env(
+    screen: pygame.Surface,
+    board_: int,
+    meta_: int,
+    score_: int,
+    rect: Rect,
+):
     screen.fill(BG_COLOR, rect)
+
     width = int(min(rect.w, rect.h / ENV_ASPECT))
     height = int(width * ENV_ASPECT)
     ox = rect.x
@@ -107,19 +225,34 @@ def render_env(screen: pygame.Surface, board_: int, meta_: int, score_: int, rec
 
     cell_size = width // 9
     board_size = 8 * cell_size
-    board_outline_w = width // 64
+    board_outline_w = max(1, width // 64)
     margin = (cell_size - 2 * board_outline_w) // 2
-    grid_stroke = board_outline_w // 2
+    grid_stroke = max(1, board_outline_w // 2)
 
-    # draw background
+    # Board background.
     board_x = margin + board_outline_w + ox
     board_y = height // 6 + board_outline_w + oy
-    board_rect = Rect(board_x, board_y, board_size, board_size)
-    board_rect = board_rect.inflate(2 * board_outline_w, 2 * board_outline_w)
-    screen.fill(BOARD_COLOR, board_rect)
-    pygame.draw.rect(screen, BOARD_OUTLINE, board_rect, width=board_outline_w)
 
-    # draw score (and high score)
+    board_rect = Rect(
+        board_x,
+        board_y,
+        board_size,
+        board_size,
+    )
+    board_rect = board_rect.inflate(
+        2 * board_outline_w,
+        2 * board_outline_w,
+    )
+
+    screen.fill(BOARD_COLOR, board_rect)
+    pygame.draw.rect(
+        screen,
+        BOARD_OUTLINE,
+        board_rect,
+        width=board_outline_w,
+    )
+
+    # Score.
     font_size = cell_size
     score_margin = height // 64
 
@@ -128,28 +261,35 @@ def render_env(screen: pygame.Surface, board_: int, meta_: int, score_: int, rec
     score_rect = score_surf.get_rect()
     score_rect.center = (
         board_x + board_size // 2,
-        board_y - board_outline_w - score_margin - font_size // 2
+        board_y
+        - board_outline_w
+        - score_margin
+        - font_size // 2,
     )
     screen.blit(score_surf, score_rect)
 
-    # draw grid
-    for i in range(8 + 1):
+    # Grid.
+    for i in range(9):
         px = i * cell_size + board_x
         py = i * cell_size + board_y
+
         pygame.draw.line(
             screen,
             GRID_COLOR,
             (px, board_y),
             (px, board_y + board_size),
-            width=grid_stroke
-        )
-        pygame.draw.line(
-            screen, GRID_COLOR, 
-            (board_x, py), (board_x + board_size, py),
-            width=grid_stroke
+            width=grid_stroke,
         )
 
-    # draw board
+        pygame.draw.line(
+            screen,
+            GRID_COLOR,
+            (board_x, py),
+            (board_x + board_size, py),
+            width=grid_stroke,
+        )
+
+    # Occupied cells.
     b = board_
     while b:
         lsb = b & -b
@@ -160,40 +300,66 @@ def render_env(screen: pygame.Surface, board_: int, meta_: int, score_: int, rec
 
         cx = c * cell_size + board_x
         cy = r * cell_size + board_y
-        
+
         a = Rect(cx, cy, cell_size, cell_size)
         a = a.inflate(-grid_stroke, -grid_stroke)
         screen.fill((255, 255, 255), a)
 
         b ^= lsb
 
-    # draw blocks
+    # Current hand.
     m = meta_
+
     bid0 = (m >> B0_SHIFT) & BLOCK_MASK
     bid1 = (m >> B1_SHIFT) & BLOCK_MASK
     bid2 = (m >> B2_SHIFT) & BLOCK_MASK
 
     block_size = cell_size // 2
-    block_outline_w = board_outline_w // 4
+    block_outline_w = max(1, board_outline_w // 4)
 
     block_x = board_x + block_size // 2
     block_y = board_y + board_size + cell_size * 5 // 4
     block_dist = (board_size - block_size) // 3
 
     if bid0 != NULL_BLOCK:
-        draw_block(screen, bid0, block_x, block_y, block_size, block_outline_w)
+        draw_block(
+            screen,
+            bid0,
+            block_x,
+            block_y,
+            block_size,
+            block_outline_w,
+        )
 
     if bid1 != NULL_BLOCK:
-        draw_block(screen, bid1, block_x + block_dist, block_y, block_size, block_outline_w)
+        draw_block(
+            screen,
+            bid1,
+            block_x + block_dist,
+            block_y,
+            block_size,
+            block_outline_w,
+        )
 
     if bid2 != NULL_BLOCK:
-        draw_block(screen, bid2, block_x + 2 * block_dist, block_y, block_size, block_outline_w)
+        draw_block(
+            screen,
+            bid2,
+            block_x + 2 * block_dist,
+            block_y,
+            block_size,
+            block_outline_w,
+        )
 
-def grid_layout(container: Rect, n: int, gap: int = 8) -> List[Rect]:
+
+def grid_layout(
+    container: Rect,
+    n: int,
+    gap: int = 8,
+) -> List[Rect]:
     avail = container.inflate(-2 * gap, -2 * gap)
-    best = None # (tile_w, tile_h, rows, cols)
+    best = None  # (area, tile_w, tile_h, rows, cols)
 
-    # try all column counts, pick the one that maximizes tile area
     for cols in range(1, n + 1):
         rows = (n + cols - 1) // cols
 
@@ -209,7 +375,7 @@ def grid_layout(container: Rect, n: int, gap: int = 8) -> List[Rect]:
         if tile_w < MIN_ENV_W or tile_h < MIN_ENV_H:
             continue
 
-        score = tile_w * tile_h # maximize area
+        score = tile_w * tile_h
         cand = (score, tile_w, tile_h, rows, cols)
 
         if best is None or cand[0] > best[0]:
@@ -217,10 +383,9 @@ def grid_layout(container: Rect, n: int, gap: int = 8) -> List[Rect]:
 
     if best is None:
         return []
-    
+
     _, tile_w, tile_h, rows, cols = best
 
-    # compute the grid's total footprint (to center it inside avail)
     grid_w = cols * tile_w + gap * (cols - 1)
     grid_h = rows * tile_h + gap * (rows - 1)
 
@@ -228,102 +393,226 @@ def grid_layout(container: Rect, n: int, gap: int = 8) -> List[Rect]:
     start_y = avail.y + (avail.h - grid_h) // 2
 
     rects = []
+
     for i in range(n):
         r = i // cols
         c = i % cols
+
         x = start_x + c * (tile_w + gap)
         y = start_y + r * (tile_h + gap)
+
         rects.append(Rect(x, y, tile_w, tile_h))
 
     return rects
 
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main() -> int:
-    screen, clock = make_window()
-    e = bb.BatchEnv(1)
-    B = e.size()
-    layout = grid_layout(screen.get_rect(), B, gap=0)
+    global _font_path
 
-    rank = None
-    if rank is not None:
-        device = torch.device(f"cuda:{rank}")
+    args = parse_args()
+
+    checkpoint = args.checkpoint.expanduser().resolve()
+    _font_path = args.font.expanduser().resolve()
+
+    if not checkpoint.is_file():
+        raise FileNotFoundError(
+            f"Checkpoint not found: {checkpoint}\n"
+            "Pass another checkpoint with --checkpoint PATH."
+        )
+
+    device = resolve_device(args.device)
+
+    print(f"checkpoint : {checkpoint}")
+    print(f"device     : {device}")
+
+    if device.type == "cuda":
+        print(f"GPU        : {torch.cuda.get_device_name(device)}")
+
+    if not _font_path.is_file():
+        print(
+            f"font       : {_font_path} not found; "
+            "using system fallback"
+        )
     else:
-        device = torch.device("cpu") # fallback
+        print(f"font       : {_font_path}")
 
-    P, V = make_models(rank)
-    cfg = load_models(
-        "C:/Users/PC/Desktop/python_projects/block_blast/chkpts", 
-        "chkpt18", 
-        P, V, device
+    # -----------------------------------------------------------------------
+    # Model
+    # -----------------------------------------------------------------------
+
+    chkpt_dir = str(checkpoint.parent)
+    chkpt_name = checkpoint.name
+
+    cfg = checkpoint_config(
+        chkpt_dir,
+        chkpt_name,
+        device,
     )
+
+    P, V = make_models(cfg, device)
+
+    load_models(
+        chkpt_dir,
+        chkpt_name,
+        P,
+        V,
+        device,
+    )
+
+    P.eval()
+    V.eval()
+
+    # -----------------------------------------------------------------------
+    # Planner
+    # -----------------------------------------------------------------------
 
     search_cfg = bb.SearchConfig()
     search_cfg.beam_width = cfg.P_beam_width
     search_cfg.per_parent_top_m = cfg.P_per_parent_top_m
+    search_cfg.root_eps = cfg.P_root_eps
     search_cfg.max_eval_P = cfg.max_bs_inference_P
     search_cfg.max_eval_V = cfg.max_bs_inference_V
     search_cfg.gamma = cfg.V_gamma
     search_cfg.teacher_tau = cfg.P_teacher_tau
 
-    plan = bb.BeamSearch(search_cfg, cfg.seed)
+    plan = bb.BeamSearch(
+        search_cfg,
+        cfg.seed,
+    )
 
-    def policy_logits_fn(boards_u64: Tensor, metas_u64: Tensor) -> Tensor:
-        b, i, k = unpack_obs(boards_u64, metas_u64, device)
+    @torch.inference_mode()
+    def policy_logits_fn(
+        boards_u64: Tensor,
+        metas_u64: Tensor,
+    ) -> Tensor:
+        b, i, k = unpack_obs(
+            boards_u64,
+            metas_u64,
+            device,
+        )
         return P(b, i, k).cpu()
-    
-    def value_fn(boards_u64: Tensor, metas_u64: Tensor) -> Tensor:
-        b, i, k = unpack_obs(boards_u64, metas_u64, device)
+
+    @torch.inference_mode()
+    def value_fn(
+        boards_u64: Tensor,
+        metas_u64: Tensor,
+    ) -> Tensor:
+        b, i, k = unpack_obs(
+            boards_u64,
+            metas_u64,
+            device,
+        )
         return vscale_inv(V(b, i, k)).cpu()
 
-    all_idx = torch.arange(B)
+    # -----------------------------------------------------------------------
+    # Environment / display
+    # -----------------------------------------------------------------------
 
-    dones = torch.zeros((B,), dtype=torch.bool)
+    screen, clock = make_window()
+
+    e = bb.BatchEnv(1)
+    B = e.size()
+
+    layout = grid_layout(
+        screen.get_rect(),
+        B,
+        gap=0,
+    )
+
+    all_idx = torch.arange(B)
+    reset_and_deal(e)
+
     running = True
+
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_q):
+
+            elif (
+                event.type == pygame.KEYDOWN
+                and event.key in (pygame.K_ESCAPE, pygame.K_q)
+            ):
                 running = False
+
             elif event.type == pygame.VIDEORESIZE:
-                layout = grid_layout(screen.get_rect(), e.size(), gap=8)
+                layout = grid_layout(
+                    screen.get_rect(),
+                    e.size(),
+                    gap=8,
+                )
 
-        # chance steps and resets
+        # Deal new hands.
         need_blocks = e.need_blocks()
-        if need_blocks.any():
-            e.rand_blocks_indices(need_blocks.nonzero(as_tuple=False).squeeze(-1))
 
+        if need_blocks.any():
+            ix = need_blocks.nonzero(
+                as_tuple=False
+            ).squeeze(-1)
+
+            e.rand_blocks_indices(ix)
+
+        # Reset completed games.
         dones = e.done()
+
         if dones.any():
-            ix = dones.nonzero(as_tuple=False).squeeze(-1)
+            ix = dones.nonzero(
+                as_tuple=False
+            ).squeeze(-1)
+
             e.reset_indices(ix)
             e.rand_blocks_indices(ix)
 
-        # render
+        # -------------------------------------------------------------------
+        # Render
+        # -------------------------------------------------------------------
+
         rect = screen.get_rect()
         screen.fill(FRAME_COLOR, rect)
 
-        b, m = e.boards(), e.metas()
-        sc = e.score()
-        for board, meta, score, r in zip(b.tolist(), m.tolist(), sc.tolist(), layout):
-            render_env(screen, board, meta, score, r)
+        boards = e.boards()
+        metas = e.metas()
+        scores = e.score()
+
+        for board, meta, score, r in zip(
+            boards.tolist(),
+            metas.tolist(),
+            scores.tolist(),
+            layout,
+        ):
+            render_env(
+                screen,
+                board,
+                meta,
+                score,
+                r,
+            )
 
         pygame.display.flip()
 
-        pi_beh = plan.search_batch(b, m, policy_logits_fn, value_fn, use_noise=False) # (M, 192)
-        
-        # msk = bb.legal_mask_batch(b, m)
-        # logits = torch.ones_like(msk, dtype=torch.float)
-        # logits = policy_logits_fn(b, m)
-        # logits.masked_fill_(~msk, -1e9)
-        # pi_beh = logits.softmax(-1)
-        
-        a = pi_beh.argmax(-1)
+        # -------------------------------------------------------------------
+        # Search / step
+        # -------------------------------------------------------------------
 
-        # env step
-        r = e.step_indices(all_idx, a)
-        dones = e.done()
+        pi_beh = plan.search_batch(
+            boards,
+            metas,
+            policy_logits_fn,
+            value_fn,
+            use_noise=False,
+        )
 
-        # time
+        actions = pi_beh.argmax(-1)
+
+        e.step_indices(
+            all_idx,
+            actions,
+        )
+
         clock.tick(FPS)
 
     pygame.quit()
