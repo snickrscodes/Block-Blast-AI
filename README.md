@@ -555,7 +555,7 @@ Value network:  1,975,792
 ```
 
 <p align="center">
-  <img src="figures/cnn_policy_value_architecture.svg"
+  <img src="figures/cnn_policy_value_architecture_final.svg"
        alt="CNN policy and value network architecture"
        width="100%">
 </p>
@@ -2441,7 +2441,7 @@ The experimental model is designed so that:
 Its design follows the general group-convolution approach introduced by Cohen and Welling's 2016 G-CNN work, while the finite-group operations and layers used here were implemented specifically for this project.
 
 <p align="center">
-  <img src="figures/p4m_equivariant_architecture.svg"
+  <img src="figures/p4m_equivariant_diagram_final.svg"
        alt="P4M-equivariant CNN and induced D4 block-pose representation"
        width="100%">
 </p>
