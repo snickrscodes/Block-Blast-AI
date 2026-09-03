@@ -6,6 +6,16 @@ The final agent does not attempt to learn the game end-to-end. Instead, it learn
 
 > **Learn what is expensive to calculate; search over what is cheap to enumerate.**
 
+<p align="center">
+  <img src="figures/gameplay.gif"
+       alt="Block Blast agent gameplay demonstration"
+       width="760">
+</p>
+
+<p align="center">
+  <em>Agent gameplay demonstration. Quantitative results below use the fixed simulator benchmark.</em>
+</p>
+
 The released system combines:
 
 * separate policy and value neural networks;
@@ -223,6 +233,16 @@ The C++ simulator resolves game mechanics exactly.
 Beam search explicitly compares short placement sequences.
 
 The value network estimates what lies beyond the current search horizon and across future-hand chance boundaries.
+
+<p align="center">
+  <img src="figures/system_algorithm.svg"
+       alt="Block Blast policy-guided search and reinforcement-learning system"
+       width="100%">
+</p>
+
+<p align="center">
+  <em>End-to-end planning and training flow. Deterministic in-hand transitions are resolved explicitly by native search, while learned policy/value models guide branch selection and unresolved frontier evaluation.</em>
+</p>
 
 ---
 
@@ -533,6 +553,45 @@ Parameter counts:
 Policy network: 1,956,512
 Value network:  1,975,792
 ```
+
+<p align="center">
+  <img src="figures/cnn_policy_value_architecture.svg"
+       alt="CNN policy and value network architecture"
+       width="100%">
+</p>
+
+<p align="center">
+  <em>PolicyNet and ValueNet use the same architectural topology but independent parameters. Piece embeddings query the spatial board through cross-attention, then feed information back into the board stream through FiLM conditioning.</em>
+</p>
+
+<details>
+<summary><strong>Detailed CNN modules and tensor shapes</strong></summary>
+
+<br>
+
+<p align="center">
+  <img src="figures/cnn_module_details.svg"
+       alt="Detailed FiLM residual, TriadMP, self-attention, and piece-board cross-attention modules"
+       width="100%">
+</p>
+
+<p align="center">
+  <em>Internal modules used by the CNN architecture.</em>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="figures/cnn_heads_and_shapes.svg"
+       alt="Policy and value output heads with tensor shapes"
+       width="100%">
+</p>
+
+<p align="center">
+  <em>Policy/value output heads and tensor-shape reference.</em>
+</p>
+
+</details>
 
 ---
 
@@ -1134,19 +1193,29 @@ The final system therefore moves nearly all high-frequency combinatorial work fr
 
 The native engine handles:
 
-* bitboard state representation;
-* block geometry;
-* legality generation;
-* state transitions;
-* line clearing;
-* reward computation;
-* random hand generation;
-* batched environments;
-* policy top-$M$ selection;
-* beam management;
-* duplicate-state elimination;
-* hard-max backup bookkeeping;
-* common-random-number hand generation.
+- bitboard state representation;
+- block geometry;
+- legality generation;
+- state transitions;
+- line clearing;
+- reward computation;
+- random hand generation;
+- batched environments;
+- policy top-$M$ selection;
+- beam management;
+- duplicate-state elimination;
+- hard-max backup bookkeeping;
+- common-random-number hand generation.
+
+<p align="center">
+  <img src="figures/native_search_state_diagram_final.svg"
+       alt="Native C++ bitboard state representation and beam-search expansion"
+       width="900">
+</p>
+
+<p align="center">
+  <em>The complete logical environment fits into a board word and metadata word; precomputed masks and compact state transitions make large native beam expansions practical.</em>
+</p>
 
 ### Precomputed move geometry
 
@@ -1241,6 +1310,16 @@ Each new stage loaded the policy/value weights from a previous checkpoint while 
 ---
 
 ## Three-stage training curriculum
+
+<p align="center">
+  <img src="figures/training_curriculum_diagram_final.svg"
+       alt="Three-stage training curriculum with progressively larger search budgets"
+       width="100%">
+</p>
+
+<p align="center">
+  <em>The network architecture remained fixed while later stages progressively spent more compute on search, longer rollouts, and higher-quality stochastic value targets. Exact configurations are listed below.</em>
+</p>
 
 | Parameter                 |  Stage 1 — coarse | Stage 2 — fine-tune | Stage 3 — large-search fine-tune |
 | ------------------------- | ----------------: | ------------------: | -------------------------------: |
@@ -2360,6 +2439,16 @@ The experimental model is designed so that:
 * the value is **invariant** under D4 × S3.
 
 Its design follows the general group-convolution approach introduced by Cohen and Welling's 2016 G-CNN work, while the finite-group operations and layers used here were implemented specifically for this project.
+
+<p align="center">
+  <img src="figures/p4m_equivariant_architecture.svg"
+       alt="P4M-equivariant CNN and induced D4 block-pose representation"
+       width="100%">
+</p>
+
+<p align="center">
+  <em>The P4M variant lifts ordinary spatial features into an explicit eight-element D4 group representation and carries that symmetry through the board and piece pathways. The released checkpoint uses the conventional CNN because the group-equivariant model was substantially more expensive.</em>
+</p>
 
 ### Verification
 
