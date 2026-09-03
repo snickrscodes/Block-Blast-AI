@@ -235,7 +235,7 @@ Beam search explicitly compares short placement sequences.
 The value network estimates what lies beyond the current search horizon and across future-hand chance boundaries.
 
 <p align="center">
-  <img src="figures/system_algorithm.svg"
+  <img src="figures/system_algorithm_diagram_final.svg"
        alt="Block Blast policy-guided search and reinforcement-learning system"
        width="100%">
 </p>
