@@ -102,7 +102,7 @@ if __name__ == "__main__":
 #     run_local(
 #         cfg, rank=0, log_dir="/workspace/block_blast/logs_finetune", 
 #         chkpt_dir="/workspace/block_blast/chkpts_finetune", resume_name=None,
-#         start_pathr="/workspace/block_blast/chkpts/chkpt35",
+#         start_path="/workspace/block_blast/chkpts/chkpt35",
 #     )
 
 # phase 3 fine tune
