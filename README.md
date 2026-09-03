@@ -16,7 +16,7 @@ The released system combines:
 * common-random-number sampling for stable stochastic value targets;
 * a C++ bitboard simulator and search engine;
 * a Pygame simulator renderer;
-* an experimental P4M / \(D_4\)-equivariant architecture;
+* an experimental P4M / D4-equivariant architecture;
 * and a Windows real-game controller using screen segmentation and calibrated mouse input.
 
 <!-- TODO: Add demo GIF/video here -->
@@ -178,15 +178,15 @@ Block Blast is a compact but surprisingly difficult stochastic planning problem.
 
 The board contains only:
 
-$$
+```math
 8\times8=64
-$$
+```
 
 cells, yet a three-piece hand can expose up to:
 
-$$
+```math
 3\times64=192
-$$
+```
 
 fixed placement indices before legality masking.
 
@@ -230,11 +230,11 @@ The value network estimates what lies beyond the current search horizon and acro
 
 Block Blast has a useful separation between **player-controlled decisions** and **environment randomness**.
 
-For board \(s\), current hand \(h\), and legal action \(a\),
+For board $s$, current hand $h$, and legal action $a$:
 
-$$
+```math
 s'=T(s,h,a)
-$$
+```
 
 is deterministic.
 
@@ -254,14 +254,14 @@ This motivates an **afterstate value function**.
 
 At a hand boundary, the value model learns approximately:
 
-$$
-V_{\text{after}}(s')
+```math
+V_{\mathrm{after}}(s')
 \approx
 \mathbb{E}_{h'\sim p(h)}
 \left[
 V(s',h')
-\right].
-$$
+\right]
+```
 
 The value network is therefore asked:
 
@@ -294,35 +294,35 @@ For each search node:
 
 1. the native engine computes exact legality masks;
 2. the policy network scores the 192 fixed action indices;
-3. only the best \(M\) legal actions are expanded;
+3. only the best $M$ legal actions are expanded;
 4. the C++ engine applies each placement exactly;
 5. duplicate successor states are eliminated;
-6. only the best \(K\) states survive to the next depth.
+6. only the best $K$ states survive to the next depth.
 
 For the released checkpoint:
 
-$$
-D=3,\qquad M=32,\qquad K=1024.
-$$
+```math
+D=3,\qquad M=32,\qquad K=1024
+```
 
 This changes the policy-learning problem substantially.
 
 A direct policy ideally needs:
 
-$$
-\arg\max_a P_\theta(a\mid s,h)=a^\*.
-$$
+```math
+\arg\max_a P_\theta(a\mid s,h)=a^*
+```
 
 A useful search prior only needs something closer to:
 
-$$
-a^\*
+```math
+a^*
 \in
-\operatorname{TopM}
+\mathrm{TopM}
 \left(
 P_\theta(\cdot\mid s,h)
-\right).
-$$
+\right)
+```
 
 If the optimal move is ranked fourth rather than first, explicit search can still recover it.
 
@@ -352,28 +352,28 @@ For terminal branches, the accumulated exact reward is sufficient.
 
 For a non-terminal frontier state:
 
-$$
-Q_{\text{leaf}}
+```math
+Q_{\mathrm{leaf}}
 =
-R_{\text{prefix}}
+R_{\mathrm{prefix}}
 +
-\gamma V_\phi(s_{\text{leaf}})
-$$
+\gamma V_\phi(s_{\mathrm{leaf}})
+```
 
 with:
 
-$$
-\gamma=0.997.
-$$
+```math
+\gamma=0.997
+```
 
 Search then performs a **hard-max backup** separately for each root action:
 
-$$
+```math
 L(a)
 =
-\max_{\text{searched continuations beginning with }a}
-Q.
-$$
+\max_{\mathrm{searched\ continuations\ beginning\ with}\ a}
+Q
+```
 
 The objective is not to average the quality of all possible player decisions; the player explicitly chooses the strongest continuation search can find.
 
@@ -395,22 +395,22 @@ This seemingly small distinction simplified the search substantially.
 
 Root action values are transformed into a teacher distribution:
 
-$$
-\pi_{\text{search}}(a)
+```math
+\pi_{\mathrm{search}}(a)
 \propto
 \exp
 \left(
 \frac{L(a)}{\tau}
 \right)
-$$
+```
 
 over legal root actions.
 
 The released configuration uses:
 
-$$
-\tau=2.0.
-$$
+```math
+\tau=2.0
+```
 
 The policy is trained by masked cross-entropy against this search-generated distribution.
 
@@ -426,15 +426,15 @@ During evaluation, the root argmax is selected.
 
 Training search perturbs only the root proposal logits using Gumbel noise.
 
-For policy logit \(z_a\),
+For policy logit $z_a$:
 
-$$
+```math
 z'_a
 =
 z_a+\epsilon G_a,
 \qquad
-G_a\sim\operatorname{Gumbel}(0,1).
-$$
+G_a\sim\mathrm{Gumbel}(0,1)
+```
 
 The final training run used:
 
@@ -442,7 +442,7 @@ The final training run used:
 P_root_eps = 0.5
 ```
 
-before root top-\(M\) selection.
+before root top-$M$ selection.
 
 Deeper search remains unperturbed, and evaluation disables search noise entirely.
 
@@ -454,19 +454,19 @@ The value model receives supervision from both ordinary trajectory states and ex
 
 For trajectory states, discounted targets are constructed using GAE:
 
-$$
+```math
 \gamma=0.997,
 \qquad
-\lambda=0.99.
-$$
+\lambda=0.99
+```
 
 The more interesting case is a completed-hand afterstate.
 
 The next hand is unknown, so the trainer samples:
 
-$$
-h_1,\ldots,h_K\sim p(h).
-$$
+```math
+h_1,\ldots,h_K\sim p(h)
+```
 
 For each sampled hand, the engine checks whether the hand is playable from the current board.
 
@@ -476,19 +476,19 @@ Hands that cannot be completed contribute zero continuation value.
 
 The afterstate target is approximated by:
 
-$$
-\hat V_{\text{after}}(s)
+```math
+\hat V_{\mathrm{after}}(s)
 =
-\frac1K
+\frac{1}{K}
 \sum_{k=1}^{K}
-V(s,h_k).
-$$
+V(s,h_k)
+```
 
 The final fine-tuning stage uses:
 
-$$
+```math
 K=1024
-$$
+```
 
 future hands per afterstate.
 
@@ -503,19 +503,19 @@ Block Blast returns are extremely heavy-tailed.
 
 The value network therefore operates on:
 
-$$
+```math
 \tilde V
 =
-\operatorname{asinh}(V).
-$$
+\mathrm{asinh}(V)
+```
 
 When raw-scale values are needed:
 
-$$
+```math
 V
 =
-\sinh(\tilde V).
-$$
+\sinh(\tilde V)
+```
 
 `asinh` remains approximately linear for small values while compressing extreme returns strongly enough to make regression substantially easier.
 
@@ -544,17 +544,17 @@ Each network receives three groups of information.
 
 The board is supplied as a flattened binary vector:
 
-$$
-x_{\text{board}}
+```math
+x_{\mathrm{board}}
 \in
-\{0,1\}^{64}.
-$$
+\{0,1\}^{64}
+```
 
 It is reshaped internally to:
 
-$$
-1\times8\times8.
-$$
+```math
+1\times8\times8
+```
 
 Three fixed CoordConv-style maps are concatenated:
 
@@ -590,9 +590,9 @@ The counter uses a learned embedding.
 
 The hand contains three oriented block IDs:
 
-$$
-(b_0,b_1,b_2).
-$$
+```math
+(b_0,b_1,b_2)
+```
 
 There are:
 
@@ -605,13 +605,13 @@ The null value is used after an individual piece has been consumed.
 
 The conceptual network signature is therefore:
 
-$$
+```math
 f(
-\text{board}_{64},
-\text{state}_{2},
-\text{blocks}_{3}
-).
-$$
+\mathrm{board}_{64},
+\mathrm{state}_{2},
+\mathrm{blocks}_{3}
+)
+```
 
 ---
 
@@ -621,9 +621,9 @@ Each current block receives a learned 128-dimensional embedding.
 
 The three hand slots are then interpreted as a complete graph:
 
-$$
-K_3.
-$$
+```math
+K_3
+```
 
 `TriadMP` performs message passing among all three pieces.
 
@@ -664,9 +664,9 @@ K3 block message passing
 
 The final policy scores:
 
-$$
+```math
 3\times64=192
-$$
+```
 
 piece/anchor combinations.
 
@@ -683,7 +683,7 @@ The value network uses the same broad ingredients:
 * CoordConv-style board representation;
 * residual CNN backbone;
 * learned block embeddings;
-* \(K_3\) message passing;
+* $K_3$ message passing;
 * state conditioning;
 * spatial self-attention;
 * block-to-board cross-attention.
@@ -704,7 +704,7 @@ The current commercial Block Blast application is treated separately.
 
 ## State representation
 
-The \(8\times8\) occupancy grid fits exactly inside:
+The $8\times8$ occupancy grid fits exactly inside:
 
 ```text
 uint64 board
@@ -789,31 +789,31 @@ The large 37-bit combo allocation is simply the space remaining in the compact 6
 
 The action space contains:
 
-$$
+```math
 192=3\times64
-$$
+```
 
 fixed indices:
 
-$$
-a\in[0,192).
-$$
+```math
+a\in[0,192)
+```
 
 The selected hand slot is:
 
-$$
-\text{slot}
+```math
+\mathrm{slot}
 =
-a\gg6.
-$$
+a\gg6
+```
 
 The lower six bits identify the board anchor:
 
-$$
-\text{anchor}
+```math
+\mathrm{anchor}
 =
-a\ \&\ 63.
-$$
+a\ \&\ 63
+```
 
 Therefore:
 
@@ -832,7 +832,7 @@ Invalid piece/anchor combinations are masked by the native engine.
 The environment contains:
 
 * **15 canonical block types**;
-* **41 unique oriented poses** after deduplicating \(D_4\) symmetries.
+* **41 unique oriented poses** after deduplicating D4 symmetries.
 
 Generation is conceptually:
 
@@ -842,21 +842,21 @@ Generation is conceptually:
 
 Thus:
 
-$$
+```math
 P(B=b)
 \approx
-\frac1{15},
-$$
+\frac{1}{15}
+```
 
-and conditional on canonical block \(b\),
+and conditional on canonical block $b$:
 
-$$
+```math
 P(P=p\mid B=b)
 =
-\frac1{n_b},
-$$
+\frac{1}{n_b}
+```
 
-where \(n_b\) is its number of unique \(D_4\) orientations.
+where $n_b$ is its number of unique D4 orientations.
 
 The generator uses `SplitMix64`.
 
@@ -865,23 +865,23 @@ The generator uses `SplitMix64`.
 
 The 15 canonical bitboards generate exactly 41 unique poses.
 
-| Canonical ID | Canonical bitboard | Cells | Distinct \(D_4\) poses | Global pose IDs |
-| -----------: | -----------------: | ----: | ---------------------: | --------------: |
-|            0 |              `0x3` |     2 |                      2 |             0–1 |
-|            1 |              `0x7` |     3 |                      2 |             2–3 |
-|            2 |              `0xF` |     4 |                      2 |             4–5 |
-|            3 |             `0x1F` |     5 |                      2 |             6–7 |
-|            4 |          `0x70707` |     9 |                      1 |               8 |
-|            5 |            `0x303` |     4 |                      1 |               9 |
-|            6 |              `0x1` |     1 |                      1 |              10 |
-|            7 |            `0x707` |     6 |                      2 |           11–12 |
-|            8 |            `0x103` |     3 |                      4 |           13–16 |
-|            9 |            `0x107` |     4 |                      8 |           17–24 |
-|           10 |          `0x10107` |     5 |                      4 |           25–28 |
-|           11 |            `0x102` |     2 |                      2 |           29–30 |
-|           12 |          `0x10204` |     3 |                      2 |           31–32 |
-|           13 |            `0x306` |     4 |                      4 |           33–36 |
-|           14 |            `0x207` |     4 |                      4 |           37–40 |
+| Canonical ID | Canonical bitboard | Cells | Distinct D4 poses | Global pose IDs |
+| -----------: | -----------------: | ----: | ----------------: | --------------: |
+|            0 |              `0x3` |     2 |                 2 |             0–1 |
+|            1 |              `0x7` |     3 |                 2 |             2–3 |
+|            2 |              `0xF` |     4 |                 2 |             4–5 |
+|            3 |             `0x1F` |     5 |                 2 |             6–7 |
+|            4 |          `0x70707` |     9 |                 1 |               8 |
+|            5 |            `0x303` |     4 |                 1 |               9 |
+|            6 |              `0x1` |     1 |                 1 |              10 |
+|            7 |            `0x707` |     6 |                 2 |           11–12 |
+|            8 |            `0x103` |     3 |                 4 |           13–16 |
+|            9 |            `0x107` |     4 |                 8 |           17–24 |
+|           10 |          `0x10107` |     5 |                 4 |           25–28 |
+|           11 |            `0x102` |     2 |                 2 |           29–30 |
+|           12 |          `0x10204` |     3 |                 2 |           31–32 |
+|           13 |            `0x306` |     4 |                 4 |           33–36 |
+|           14 |            `0x207` |     4 |                 4 |           37–40 |
 
 The pose offsets are:
 
@@ -891,9 +891,9 @@ The pose offsets are:
 
 All orbit sizes belong to:
 
-$$
-\{1,2,4,8\}.
-$$
+```math
+\{1,2,4,8\}
+```
 
 The native canonical draw uses:
 
@@ -903,9 +903,9 @@ rng.next_u64() % 15
 
 rather than rejection sampling.
 
-Because 15 does not exactly divide \(2^{64}\), the canonical distribution technically contains a one-count modulo imbalance over the full \(2^{64}\)-value source space. This bias is negligible in practice.
+Because 15 does not exactly divide $2^{64}$, the canonical distribution technically contains a one-count modulo imbalance over the full $2^{64}$-value source space. This bias is negligible in practice.
 
-Orientation selection has no such modulo imbalance because every orbit size divides \(2^{64}\).
+Orientation selection has no such modulo imbalance because every orbit size divides $2^{64}$.
 
 </details>
 
@@ -917,13 +917,13 @@ The simulator scoring system was reverse-engineered from the high-combo scoring 
 
 Let:
 
-* \(n(b)\) = number of occupied cells in the placed block;
-* \(\ell\) = number of rows/columns cleared simultaneously;
-* \(c\) = combo before the placement.
+* $n(b)$ = number of occupied cells in the placed block;
+* $\ell$ = number of rows/columns cleared simultaneously;
+* $c$ = combo before the placement.
 
 Define:
 
-$$
+```math
 B(\ell)
 =
 \begin{cases}
@@ -931,33 +931,31 @@ B(\ell)
 10,&\ell=1,\\
 10\ell(\ell-1),&\ell\ge2.
 \end{cases}
-$$
+```
 
 If one or more lines are cleared, the combo first increments:
 
-$$
-c'=c+1.
-$$
+```math
+c'=c+1
+```
 
 The placement reward is:
 
-$$
+```math
 r
 =
 n(b)
 +
 c'B(\ell)
 +
-300
-\cdot
-\mathbf1[\text{board empty after clearing}].
-$$
+300\,\mathbf{1}_{\mathrm{board\ clear}}
+```
 
 If no line clears:
 
-$$
-r=n(b).
-$$
+```math
+r=n(b)
+```
 
 The C++ environment is the authoritative implementation.
 
@@ -977,21 +975,21 @@ Each placement initially decrements the counter.
 
 If a line is cleared:
 
-$$
+```math
 c'=c+1
-$$
+```
 
 and after the consumed piece is removed and the hand compacted:
 
-$$
+```math
 q'
 =
 3
 +
-\mathbf1[b_0\ne\text{NULL}]
+\mathbf{1}_{b_0\ne\mathrm{NULL}}
 +
-\mathbf1[b_1\ne\text{NULL}].
-$$
+\mathbf{1}_{b_1\ne\mathrm{NULL}}
+```
 
 Therefore:
 
@@ -1003,21 +1001,21 @@ Therefore:
 
 If no line is cleared and the old counter was 1:
 
-$$
+```math
 c'=0,
 \qquad
-q'=3.
-$$
+q'=3
+```
 
 Otherwise the combo is preserved and the counter simply decreases.
 
 The line reward uses the incremented combo:
 
-$$
-r_{\text{line}}
+```math
+r_{\mathrm{line}}
 =
-(c+1)B(\ell).
-$$
+(c+1)B(\ell)
+```
 
 This allows a combo to survive several non-clearing placements rather than necessarily resetting immediately.
 
@@ -1144,7 +1142,7 @@ The native engine handles:
 * reward computation;
 * random hand generation;
 * batched environments;
-* policy top-\(M\) selection;
+* policy top-$M$ selection;
 * beam management;
 * duplicate-state elimination;
 * hard-max backup bookkeeping;
@@ -1219,7 +1217,7 @@ It came from several changes acting together:
 * using bitwise legality checks;
 * examining only rows/columns touched by a placement;
 * moving transitions into C++;
-* aggressive policy top-\(M\) pruning;
+* aggressive policy top-$M$ pruning;
 * bounded global beams;
 * native duplicate-state elimination;
 * simpler backup logic;
@@ -1244,29 +1242,29 @@ Each new stage loaded the policy/value weights from a previous checkpoint while 
 
 ## Three-stage training curriculum
 
-| Parameter                 |    Stage 1 — coarse | Stage 2 — fine-tune | Stage 3 — large-search fine-tune |
-| ------------------------- | ------------------: | ------------------: | -------------------------------: |
-| Starting model            |              random |   Stage-1 `chkpt35` |                 Stage-2 `chkpt2` |
-| Worker environments       |                 256 |                 256 |                              256 |
-| Evaluation environments   |                 256 |                 256 |                              256 |
-| Horizon                   |                 128 |                 512 |                              512 |
-| Rollouts / phase          |                  32 |                  16 |                               32 |
-| Configured phases         |                  40 |                  15 |                                5 |
-| Future hands / afterstate |                  64 |                 256 |                             1024 |
-| Per-parent top-\(M\)      |                  16 |                  24 |                               32 |
-| Beam width                |                 128 |                 256 |                             1024 |
-| Maximum train batch       |                8192 |                8192 |                             8192 |
-| Policy inference cap      |              40,000 |              35,000 |                           35,000 |
-| Value inference cap       |             100,000 |             100,000 |                          100,000 |
-| Policy LR                 | \(5e{-4}\to5e{-5}\) | \(1e{-4}\to1e{-5}\) |                       \(3e{-4}\) |
-| Value LR                  | \(3e{-4}\to3e{-5}\) | \(5e{-5}\to5e{-6}\) |                     \(1.5e{-4}\) |
-| Policy warmup             |                   0 |                 128 |                              128 |
-| Value warmup              |                   0 |                 192 |                              192 |
-| \(\gamma\)                |                .997 |                .997 |                             .997 |
-| GAE \(\lambda\)           |                 .99 |                 .99 |                              .99 |
-| Teacher temperature       |                 2.0 |                 2.0 |                              2.0 |
-| Root Gumbel scale         |                  .5 |                  .5 |                               .5 |
-| Approx. runtime / phase   |                ~1 h |              ~5–6 h |                      15.7–18.4 h |
+| Parameter                 |  Stage 1 — coarse | Stage 2 — fine-tune | Stage 3 — large-search fine-tune |
+| ------------------------- | ----------------: | ------------------: | -------------------------------: |
+| Starting model            |            random |   Stage-1 `chkpt35` |                 Stage-2 `chkpt2` |
+| Worker environments       |               256 |                 256 |                              256 |
+| Evaluation environments   |               256 |                 256 |                              256 |
+| Horizon                   |               128 |                 512 |                              512 |
+| Rollouts / phase          |                32 |                  16 |                               32 |
+| Configured phases         |                40 |                  15 |                                5 |
+| Future hands / afterstate |                64 |                 256 |                             1024 |
+| Per-parent top-$M$        |                16 |                  24 |                               32 |
+| Beam width                |               128 |                 256 |                             1024 |
+| Maximum train batch       |              8192 |                8192 |                             8192 |
+| Policy inference cap      |            40,000 |              35,000 |                           35,000 |
+| Value inference cap       |           100,000 |             100,000 |                          100,000 |
+| Policy LR                 | $5e{-4}\to5e{-5}$ |   $1e{-4}\to1e{-5}$ |                         $3e{-4}$ |
+| Value LR                  | $3e{-4}\to3e{-5}$ |   $5e{-5}\to5e{-6}$ |                       $1.5e{-4}$ |
+| Policy warmup             |                 0 |                 128 |                              128 |
+| Value warmup              |                 0 |                 192 |                              192 |
+| $\gamma$                  |              .997 |                .997 |                             .997 |
+| GAE $\lambda$             |               .99 |                 .99 |                              .99 |
+| Teacher temperature       |               2.0 |                 2.0 |                              2.0 |
+| Root Gumbel scale         |                .5 |                  .5 |                               .5 |
+| Approx. runtime / phase   |              ~1 h |              ~5–6 h |                      15.7–18.4 h |
 
 The second stage was configured for 15 phases but was manually terminated after approximately nine.
 
@@ -1380,83 +1378,84 @@ The trainer uses a custom cosine scheduler.
 
 Let:
 
-* \(\eta_0\) = base learning rate;
-* \(\eta_{\min}\) = final learning rate;
-* \(W\) = warmup steps;
-* \(T\) = total scheduler steps.
+* $\eta_0$ = base learning rate;
+* $\eta_{\min}$ = final learning rate;
+* $W$ = warmup steps;
+* $T$ = total scheduler steps.
 
 During warmup:
 
-$$
+```math
 \eta(t)
 =
 \eta_0
 \frac{t+1}{W},
 \qquad
-0\le t<W.
-$$
+0\le t<W
+```
 
 After warmup, define:
 
-$$
+```math
 D=T-W
-$$
+```
 
 and:
 
-$$
+```math
 d=
-\min(
+\min
+\left(
 \max(t-W,0),
 D
-).
-$$
+\right)
+```
 
 Then:
 
-$$
+```math
 \eta(t)
 =
 \eta_{\min}
 +
 (\eta_0-\eta_{\min})
-\frac{1+\cos(\pi d/D)}{2}.
-$$
+\frac{1+\cos(\pi d/D)}{2}
+```
 
 The policy scheduler estimates:
 
-$$
+```math
 T_P
 =
 \left\lceil
 \frac{
-N_{\text{env}}HR
+N_{\mathrm{env}}HR
 }{
 B_{\max}A_P
 }
 \right\rceil
-N_{\text{phases}},
-$$
+N_{\mathrm{phases}}
+```
 
-where \(A_P\) is policy gradient accumulation.
+where $A_P$ is policy gradient accumulation.
 
-The value scheduler reserves approximately \(4/3\) as many updates:
+The value scheduler reserves approximately $4/3$ as many updates:
 
-$$
+```math
 T_V
 =
 \left\lfloor
-\frac43
+\frac{4}{3}
 \left\lceil
 \frac{
-N_{\text{env}}HR
+N_{\mathrm{env}}HR
 }{
 B_{\max}A_V
 }
 \right\rceil
-N_{\text{phases}}
-\right\rfloor.
-$$
+N_{\mathrm{phases}}
+\right\rfloor
+```
 
 The additional value budget accounts for hand-boundary afterstate examples.
 
@@ -1657,7 +1656,7 @@ internally stores:
 rng_seed = splitmix64(seed);
 ```
 
-For afterstate \((B,M)\):
+For afterstate $(B,M)$:
 
 ```cpp
 uint64_t hash_state(uint64_t board, uint64_t meta) {
@@ -1699,11 +1698,15 @@ then selects one of that canonical shape's distinct orientations.
 
 Three such draws form one hand.
 
-Thus the entire \(K\)-hand sample set is a deterministic function of:
+Thus the entire $K$-hand sample set is a deterministic function of:
 
-$$
-(\text{board},\text{metadata},\text{CRN phase seed}).
-$$
+```math
+(
+\mathrm{board},
+\mathrm{metadata},
+\mathrm{CRN\ phase\ seed}
+)
+```
 
 </details>
 
@@ -2034,15 +2037,15 @@ Pixels are captured using MSS.
 
 BGRA pixels are converted to grayscale luminance:
 
-$$
+```math
 Y
 =
 0.2126R
 +
 0.7152G
 +
-0.0722B.
-$$
+0.0722B
+```
 
 The controller then applies a calibrated crop using:
 
@@ -2093,7 +2096,7 @@ For each ROI, the controller:
 
 1. separates the rendered block from the tray background;
 2. finds its extent;
-3. samples a \(5\times5\) mini-grid;
+3. samples a $5\times5$ mini-grid;
 4. converts that pattern to a bit encoding;
 5. normalizes its orientation representation;
 6. matches it against the 41 known engine poses.
@@ -2128,25 +2131,25 @@ This allows an engine action selecting canonical slot 0 to correctly pick up a b
 
 The agent returns:
 
-$$
-a\in[0,192).
-$$
+```math
+a\in[0,192)
+```
 
 The controller extracts:
 
-$$
-\text{engine slot}
+```math
+\mathrm{engine\ slot}
 =
 a\gg6
-$$
+```
 
 and:
 
-$$
-\text{anchor}
+```math
+\mathrm{anchor}
 =
-a\ \&\ 63.
-$$
+a\ \&\ 63
+```
 
 The canonical engine slot is translated through the physical-slot mapping.
 
@@ -2165,51 +2168,51 @@ The actual drag is performed through Win32 cursor/input APIs.
 <details>
 <summary><strong>Exact current mouse-drag implementation</strong></summary>
 
-For physical block \(b\):
+For physical block $b$:
 
-$$
-\text{shift}
+```math
+\mathrm{shift}
 =
 (a\ \&\ 63)
 -
-\operatorname{REF\_POS}[b].
-$$
+\mathrm{REF\_POS}[b]
+```
 
 The board coordinates used by the visual controller are:
 
-$$
+```math
 r_0
 =
-7-(\text{shift}\gg3),
-$$
+7-(\mathrm{shift}\gg3)
+```
 
-$$
+```math
 c_0
 =
-7-(\text{shift}\ \&\ 7).
-$$
+7-(\mathrm{shift}\ \&\ 7)
+```
 
 After correcting for the geometric center of the block, let:
 
-* \((x_0,y_0)\) = physical pickup;
-* \((t_x,t_y)\) = desired board target;
-* \(c_y\) = observed lifted-piece center.
+* $(x_0,y_0)$ = physical pickup;
+* $(t_x,t_y)$ = desired board target;
+* $c_y$ = observed lifted-piece center.
 
 The calibrated destination is:
 
-$$
+```math
 x_1
 =
 x_0+
-\frac{t_x-x_0}{1.45},
-$$
+\frac{t_x-x_0}{1.45}
+```
 
-$$
+```math
 y_1
 =
 y_0+
-\frac{t_y-c_y}{1.45}.
-$$
+\frac{t_y-c_y}{1.45}
+```
 
 Client coordinates are transformed to absolute screen coordinates through `ClientToScreen`.
 
@@ -2222,9 +2225,11 @@ The current drag uses:
 
 or approximately:
 
-$$
-10\text{ ms / interpolation point}.
-$$
+```math
+10\ \mathrm{ms}
+```
+
+per interpolation point.
 
 The full programmed sequence is approximately:
 
@@ -2280,10 +2285,11 @@ MEASUREMENT_WIDTH = 576
 
 using:
 
-$$
-s=
-\frac{\text{current client width}}{576}.
-$$
+```math
+s
+=
+\frac{\mathrm{current\ client\ width}}{576}
+```
 
 <details>
 <summary><strong>Full current geometry calibration</strong></summary>
@@ -2317,7 +2323,7 @@ The current luminance value:
 41.5442
 ```
 
-corresponds approximately to the current empty-cell RGB appearance.
+corresponds approximately to the current empty-cell appearance.
 
 An older darker visual configuration produced:
 
@@ -2341,17 +2347,17 @@ The repository also contains a custom symmetry-aware architecture in:
 model/p4mcnn.py
 ```
 
-Block Blast has natural geometric \(D_4\) symmetry:
+Block Blast has natural geometric D4 symmetry:
 
 * four rotations;
 * four reflected orientations.
 
-The ordering of the three hand slots also admits an \(S_3\) permutation symmetry.
+The ordering of the three hand slots also admits an S3 permutation symmetry.
 
 The experimental model is designed so that:
 
-* the policy is **equivariant** under \(D_4\times S_3\);
-* the value is **invariant** under \(D_4\times S_3\).
+* the policy is **equivariant** under D4 × S3;
+* the value is **invariant** under D4 × S3.
 
 Its design follows the general group-convolution approach introduced by Cohen and Welling's 2016 G-CNN work, while the finite-group operations and layers used here were implemented specifically for this project.
 
@@ -2365,21 +2371,21 @@ python test_equivariance.py
 
 The test exhaustively enumerates:
 
-$$
+```math
 |D_4|\times|S_3|
 =
 8\times6
 =
 48
-$$
+```
 
 combined transformations.
 
 Using double-precision networks, it checks policy equivariance and value invariance with a maximum absolute tolerance of:
 
-$$
-10^{-5}.
-$$
+```math
+10^{-5}
+```
 
 ### Why it was not trained
 
@@ -2417,55 +2423,55 @@ by parameter count.
 
 The activation cost grows more aggressively because regular group features carry an explicit group dimension:
 
-$$
-|D_4|=8.
-$$
+```math
+|D_4|=8
+```
 
 An abstract feature map:
 
-$$
+```math
 (B,C,H,W)
-$$
+```
 
 becomes:
 
-$$
-(B,C,8,H,W),
-$$
+```math
+(B,C,8,H,W)
+```
 
 or equivalently for ordinary PyTorch convolution storage:
 
-$$
-(B,8C,H,W).
-$$
+```math
+(B,8C,H,W)
+```
 
 Thus a nominal 64-channel regular group representation physically carries:
 
-$$
+```math
 64\times8=512
-$$
+```
 
 orientation-indexed feature channels.
 
 ### Lifted convolution
 
-The first group layer maps a normal image into \(D_4\)-indexed features.
+The first group layer maps a normal image into D4-indexed features.
 
 A learned base kernel:
 
-$$
+```math
 W
 \in
-\mathbb R^{
-C_{\text{out}}
+\mathbb{R}^{
+C_{\mathrm{out}}
 \times
-C_{\text{in}}
+C_{\mathrm{in}}
 \times
 k
 \times
 k
 }
-$$
+```
 
 is transformed into all eight rotations/reflections.
 
@@ -2477,33 +2483,33 @@ After the lift, both input and output carry the group dimension.
 
 A regular group-convolution kernel effectively contains:
 
-$$
-C_{\text{out}}
+```math
+C_{\mathrm{out}}
 \times
-C_{\text{in}}
+C_{\mathrm{in}}
 \times
 8
 \times
 k
 \times
 k
-$$
+```
 
 learned parameters before spatial/group transforms construct the physical convolution bank.
 
 The implementation combines:
 
 * spatial transformation of filters;
-* a precomputed \(D_4\) multiplication table;
+* a precomputed D4 multiplication table;
 * inverse/group-index permutations.
 
 The group ordering is:
 
-$$
-(e,r,r^2,r^3,s,rs,r^2s,r^3s),
-$$
+```math
+(e,r,r^2,r^3,s,rs,r^2s,r^3s)
+```
 
-where \(r\) is a \(90^\circ\) counter-clockwise rotation and \(s\) is a reflection.
+where $r$ is a $90^\circ$ counter-clockwise rotation and $s$ is a reflection.
 
 </details>
 
@@ -2512,27 +2518,27 @@ where \(r\) is a \(90^\circ\) counter-clockwise rotation and \(s\) is a reflecti
 
 The 41 oriented block IDs are not treated as unrelated categories in the P4M architecture.
 
-For canonical block \(b\), define its stabilizer:
+For canonical block $b$, define its stabilizer:
 
-$$
+```math
 H_b
 =
-\{g\in D_4:g\cdot b=b\}.
-$$
+\{g\in D_4:g\cdot b=b\}
+```
 
 Its distinct poses form the coset space:
 
-$$
+```math
 D_4/H_b
-$$
+```
 
 with orbit size:
 
-$$
+```math
 n_b
 =
-\frac8{|H_b|}.
-$$
+\frac{8}{|H_b|}
+```
 
 The engine constructs:
 
@@ -2543,49 +2549,43 @@ pid2b[p]        → global pose → canonical block
 pid2g[p]        → global pose → representative group element
 ```
 
-Suppose global pose \(p\) belongs to canonical block \(b\) with representative \(g_p\).
+Suppose global pose $p$ belongs to canonical block $b$ with representative $g_p$.
 
-For every:
+For every $g\in D_4$, the group-aware embedding looks up the pose corresponding to:
 
-$$
-g\in D_4,
-$$
-
-the group-aware embedding looks up the pose corresponding to:
-
-$$
-gg_p.
-$$
+```math
+gg_p
+```
 
 Conceptually:
 
-$$
+```math
 p_g
 =
-\operatorname{pose\_off}(b)
+\mathrm{pose\_off}(b)
 +
-\operatorname{g2pose}(b,gg_p).
-$$
+\mathrm{g2pose}(b,gg_p)
+```
 
 Instead of one categorical vector:
 
-$$
-e_p\in\mathbb R^D,
-$$
+```math
+e_p\in\mathbb{R}^{D}
+```
 
 the piece is represented as:
 
-$$
+```math
 E(p)
 \in
-\mathbb R^{8\times D}.
-$$
+\mathbb{R}^{8\times D}
+```
 
 For symmetric pieces, stabilizer-equivalent group positions naturally repeat the same unique pose.
 
 The null block maps to the padding/null embedding in every group position.
 
-The separate \(S_3\) symmetry over the three hand slots is handled through shared slot processing and permutation-equivariant `TriadMP` message passing.
+The separate S3 symmetry over the three hand slots is handled through shared slot processing and permutation-equivariant `TriadMP` message passing.
 
 </details>
 
@@ -2617,7 +2617,7 @@ These approaches are documented because the final design was shaped as much by w
 | Afterstate learning        | Separate decisions from future randomness           | Became a core idea                                                           |
 | Broader/deeper tree search | Resolve tactical sequences                          | Useful but expensive without aggressive pruning                              |
 | More complex backups       | Extract more information from search trees          | Simpler hard-max/frontier logic proved more robust                           |
-| Policy-guided top-\(M\)    | Restrict search to plausible moves                  | Became essential                                                             |
+| Policy-guided top-$M$      | Restrict search to plausible moves                  | Became essential                                                             |
 | Beam search                | Bound global tree growth                            | Became final planner                                                         |
 | Larger CNNs                | Learn more strategy implicitly                      | Less cost-effective than spending compute on search                          |
 | D4/P4M equivariance        | Encode spatial symmetry exactly                     | Numerically correct but too expensive for final training budget              |
@@ -2813,6 +2813,8 @@ The P4M implementation is tested for equivariance but does not include a fully t
 **Taco S. Cohen and Max Welling.**
 *Group Equivariant Convolutional Networks.*
 ICML, 2016.
+
+https://proceedings.mlr.press/v48/cohenc16.html
 
 ---
 
