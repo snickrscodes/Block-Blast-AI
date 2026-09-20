@@ -29,8 +29,7 @@ The released system combines:
 * an experimental P4M / D4-equivariant architecture;
 * and a Windows real-game controller using screen segmentation and calibrated mouse input.
 
-<!-- TODO: Add demo GIF/video here -->
-
+**Historical real-game demo & discussion:** [Reddit post — 26K+ views](https://www.reddit.com/r/blockblast/comments/1qvmdax/block_blast_ai_scores_141_million/)
 ---
 
 ## Contents
